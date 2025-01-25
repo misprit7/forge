@@ -66,6 +66,7 @@ public final class GamePlayerUtil {
     }
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
         final LobbyPlayerAi player = new LobbyPlayerAi(name, options);
+        // final LobbyPlayerAi player = new LobbyPlayerGym(name, options);
 
         // TODO: implement specific AI profiles for quest mode.
         String profile = "";
