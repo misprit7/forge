@@ -4,6 +4,7 @@ import forge.LobbyPlayer;
 import forge.ai.AIOption;
 import forge.ai.AiProfileUtil;
 import forge.ai.LobbyPlayerAi;
+import forge.ai.gym.LobbyPlayerGym;
 import forge.gui.GuiBase;
 import forge.gui.util.SOptionPane;
 import forge.localinstance.properties.ForgePreferences.FPref;
@@ -65,8 +66,8 @@ public final class GamePlayerUtil {
         return createAiPlayer(name, avatarIndex, sleeveIndex, options, "");
     }
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
-        final LobbyPlayerAi player = new LobbyPlayerAi(name, options);
-        // final LobbyPlayerAi player = new LobbyPlayerGym(name, options);
+        // final LobbyPlayerAi player = new LobbyPlayerAi(name, options);
+        final LobbyPlayerAi player = new LobbyPlayerGym(name, null);
 
         // TODO: implement specific AI profiles for quest mode.
         String profile = "";

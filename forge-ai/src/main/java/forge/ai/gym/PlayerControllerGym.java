@@ -1,4 +1,4 @@
-package forge.gym;
+package forge.ai.gym;
 
 import forge.ai.*;
 
@@ -63,9 +63,10 @@ public class PlayerControllerGym extends PlayerControllerAi {
 
     @Override
     public void declareAttackers(Player attacker, Combat combat) {
+        System.out.println("Declaring gym attackers");
         final FCollectionView<GameEntity> defs = combat.getDefenders();
         for (Card c : attacker.getCreaturesInPlay()) {
-            combat.addAttacker(c, null);
+            combat.addAttacker(c, defs.getFirst());
         }
     }
 
