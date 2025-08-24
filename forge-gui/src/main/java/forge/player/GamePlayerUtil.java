@@ -67,11 +67,17 @@ public final class GamePlayerUtil {
         return createAiPlayer(name, avatarIndex, sleeveIndex, options, "");
     }
     public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride) {
+        return createAiPlayer(name, avatarIndex, sleeveIndex, options, profileOverride, false);
+    }
+    
+    public static LobbyPlayer createAiPlayer(final String name, final int avatarIndex, final int sleeveIndex, final Set<AIOption> options, final String profileOverride, final boolean useRlAgent) {
         final LobbyPlayerAi player = new LobbyPlayerAi(name, options);
 
         // TODO: implement specific AI profiles for quest mode.
         String profile = "";
-        if (profileOverride.isEmpty()) {
+        if (useRlAgent) {
+            profile = "RL";
+        } else if (profileOverride.isEmpty()) {
             String lastProfileChosen = FModel.getPreferences().getPref(FPref.UI_CURRENT_AI_PROFILE);
             if (!AiProfileUtil.getProfilesDisplayList().contains(lastProfileChosen)) {
                 System.out.println("[AI Preferences] Unknown profile " + lastProfileChosen + " was requested, resetting to default.");
@@ -93,7 +99,15 @@ public final class GamePlayerUtil {
         player.setAiProfile(profile);
         player.setAvatarIndex(avatarIndex);
         player.setSleeveIndex(sleeveIndex);
+        player.setUseRlAgent(useRlAgent);
         return player;
+    }
+    
+    public static LobbyPlayer createRlPlayer(final String name) {
+        final int avatarCount = GuiBase.getInterface().getAvatarCount();
+        final int sleeveCount = GuiBase.getInterface().getSleevesCount();
+        return createAiPlayer(name, avatarCount == 0 ? 0 : MyRandom.getRandom().nextInt(avatarCount), 
+                            sleeveCount == 0 ? 0 : MyRandom.getRandom().nextInt(sleeveCount), null, "", true);
     }
 
     public static void setPlayerName() {

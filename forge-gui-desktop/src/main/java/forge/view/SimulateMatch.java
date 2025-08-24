@@ -80,6 +80,15 @@ public class SimulateMatch {
         }
 
         boolean outputGamelog = !params.containsKey("q");
+        
+        boolean useRlAgent = false;
+        if (params.containsKey("ai")) {
+            String aiType = params.get("ai").get(0).toLowerCase();
+            if ("rl".equals(aiType)) {
+                useRlAgent = true;
+                System.out.println("Using Reinforcement Learning AI agent");
+            }
+        }
 
         GameType type = GameType.Constructed;
         if (params.containsKey("f")) {
@@ -94,7 +103,7 @@ public class SimulateMatch {
         }
 
         if (params.containsKey("t")) {
-            simulateTournament(params, rules, outputGamelog);
+            simulateTournament(params, rules, outputGamelog, useRlAgent);
             System.out.flush();
             return;
         }
@@ -124,7 +133,13 @@ public class SimulateMatch {
                 } else {
                     rp = new RegisteredPlayer(d);
                 }
-                rp.setPlayer(GamePlayerUtil.createAiPlayer(name, i - 1));
+                
+                if (useRlAgent && i == 1) {
+                    // Only make the first player use RL agent
+                    rp.setPlayer(GamePlayerUtil.createRlPlayer(name));
+                } else {
+                    rp.setPlayer(GamePlayerUtil.createAiPlayer(name, i - 1));
+                }
                 pp.add(rp);
                 i++;
             }
@@ -153,7 +168,7 @@ public class SimulateMatch {
     }
 
     private static void argumentHelp() {
-        System.out.println("Syntax: forge.exe sim -d <deck1[.dck]> ... <deckX[.dck]> -D [D] -n [N] -m [M] -t [T] -p [P] -f [F] -q");
+        System.out.println("Syntax: forge.exe sim -d <deck1[.dck]> ... <deckX[.dck]> -D [D] -n [N] -m [M] -t [T] -p [P] -f [F] -ai [rl] -q");
         System.out.println("\tsim - stands for simulation mode");
         System.out.println("\tdeck1 (or deck2,...,X) - constructed deck name or filename (has to be quoted when contains multiple words)");
         System.out.println("\tdeck is treated as file if it ends with a dot followed by three numbers or letters");
@@ -163,6 +178,7 @@ public class SimulateMatch {
         System.out.println("\tT - Type of tournament to run with all provided decks (Bracket, RoundRobin, Swiss)");
         System.out.println("\tP - Amount of players per match (used only with Tournaments, defaults to 2)");
         System.out.println("\tF - format of games, defaults to constructed");
+        System.out.println("\tai - AI type: 'rl' for reinforcement learning agent, defaults to standard AI");
         System.out.println("\tq - Quiet flag. Output just the game result, not the entire game log.");
     }
 
@@ -209,7 +225,7 @@ public class SimulateMatch {
         }
     }
 
-    private static void simulateTournament(Map<String, List<String>> params, GameRules rules, boolean outputGamelog) {
+    private static void simulateTournament(Map<String, List<String>> params, GameRules rules, boolean outputGamelog, boolean useRlAgent) {
         String tournament = params.get("t").get(0);
         AbstractTournament tourney = null;
         int matchPlayers = params.containsKey("p") ? Integer.parseInt(params.get("p").get(0)) : 2;
@@ -226,7 +242,12 @@ public class SimulateMatch {
                 }
 
                 deckGroup.addAiDeck(d);
-                players.add(new TournamentPlayer(GamePlayerUtil.createAiPlayer(d.getName(), 0), numPlayers));
+                if (useRlAgent && numPlayers == 0) {
+                    // Only make the first player use RL agent
+                    players.add(new TournamentPlayer(GamePlayerUtil.createRlPlayer(d.getName()), numPlayers));
+                } else {
+                    players.add(new TournamentPlayer(GamePlayerUtil.createAiPlayer(d.getName(), 0), numPlayers));
+                }
                 numPlayers++;
             }
         }
@@ -245,7 +266,12 @@ public class SimulateMatch {
                         return;
                     }
                     deckGroup.addAiDeck(d);
-                    players.add(new TournamentPlayer(GamePlayerUtil.createAiPlayer(d.getName(), 0), numPlayers));
+                    if (useRlAgent && numPlayers == 0) {
+                        // Only make the first player use RL agent
+                        players.add(new TournamentPlayer(GamePlayerUtil.createRlPlayer(d.getName()), numPlayers));
+                    } else {
+                        players.add(new TournamentPlayer(GamePlayerUtil.createAiPlayer(d.getName(), 0), numPlayers));
+                    }
                     numPlayers++;
                 }
             }

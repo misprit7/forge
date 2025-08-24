@@ -59,13 +59,17 @@ class MockRLAgent:
         print(f"Mock agent 'loaded' from {path}")
 
 
-def create_training_environment(host: str = "localhost", port: int = 12345) -> ForgeEnv:
+def create_training_environment(host: str = "localhost", port: int = 12345, 
+                                deck1: str = "wr", deck2: str = "gb") -> ForgeEnv:
     """Create and configure the training environment"""
     env = ForgeEnv(
         state_size=1000,  # Size of game state vector
         action_size=10,   # Size of action vector
         host=host,
-        port=port
+        port=port,
+        deck1=deck1,
+        deck2=deck2,
+        auto_start_forge=True  # Automatically start Forge process
     )
     return env
 
@@ -220,13 +224,18 @@ def main():
                         help="Number of episodes for evaluation")
     parser.add_argument("--model-name", default="forge_agent",
                         help="Name for saving the model")
+    parser.add_argument("--deck1", default="wr",
+                        help="First deck to use (e.g., 'wr' for white/red)")
+    parser.add_argument("--deck2", default="gb", 
+                        help="Second deck to use (e.g., 'gb' for green/blue)")
     
     args = parser.parse_args()
     
     print("=== Forge RL Agent Training ===")
     print(f"Algorithm: {args.algorithm}")
     print(f"Timesteps: {args.timesteps}")
-    print(f"Forge server: {args.host}:{args.port}")
+    print(f"Decks: {args.deck1} vs {args.deck2}")
+    print(f"Forge will auto-start on localhost:{args.port}")
     print()
     
     # Create directories
@@ -235,8 +244,13 @@ def main():
     os.makedirs("tensorboard_logs", exist_ok=True)
     
     # Create environment
-    print("Creating environment...")
-    env = create_training_environment(args.host, args.port)
+    print("Creating environment (this will auto-start Forge)...")
+    env = create_training_environment(args.host, args.port, args.deck1, args.deck2)
+    
+    # Show log file location
+    if hasattr(env, 'logs_dir'):
+        print(f"Forge output will be logged to: {env.logs_dir}")
+        print("Check the log files for detailed Forge execution information.")
     
     try:
         # Train agent

@@ -35,18 +35,26 @@ public class RlBridge {
      */
     public boolean connect(String host, int port) {
         try {
-            socket = new Socket(host, port);
+            // Start as server and wait for Python client to connect
+            ServerSocket serverSocket = new ServerSocket(port);
+            System.out.println("RL Bridge server started on port " + port + ", waiting for Python client...");
+            
+            socket = serverSocket.accept();
+            System.out.println("Python RL client connected!");
+            
             reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             writer = new PrintWriter(socket.getOutputStream(), true);
             connected = true;
+            
+            // Start the response reader thread
+            startResponseReader();
             
             // Send a hello message to verify connection
             sendMessage("{\"type\": \"hello\", \"message\": \"Forge RL Bridge connected\"}");
             
             return true;
         } catch (IOException e) {
-            System.err.println("Failed to connect to RL agent at " + host + ":" + port);
-            e.printStackTrace();
+            System.err.println("Failed to start RL server at " + host + ":" + port + " - " + e.getMessage());
             connected = false;
             return false;
         }
@@ -69,11 +77,19 @@ public class RlBridge {
         }
         
         try {
-            // TODO: For now, just use fallback since we need JSON library
-            // In a full implementation, we would serialize the request to JSON,
-            // send it over the socket, and parse the response
-            System.err.println("RL Bridge not fully implemented, using fallback");
-            return createFallbackResponse(request);
+            // Send request as simple JSON (basic implementation)
+            String jsonRequest = createJsonRequest(request);
+            sendMessage(jsonRequest);
+            
+            // Wait for response with timeout
+            String responseStr = waitForResponse(10000); // 10 second timeout
+            
+            if (responseStr != null) {
+                return parseJsonResponse(responseStr);
+            } else {
+                System.err.println("Timeout waiting for RL agent response, using fallback");
+                return createFallbackResponse(request);
+            }
             
         } catch (Exception e) {
             System.err.println("Error communicating with RL agent: " + e.getMessage());
@@ -82,11 +98,68 @@ public class RlBridge {
         }
     }
     
+    private String createJsonRequest(PlayerControllerRl.RlDecisionRequest request) {
+        // Basic JSON creation without external library
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        json.append("\"type\": \"decision_request\",");
+        json.append("\"request\": {");
+        json.append("\"decisionType\": \"").append(request.decisionType).append("\",");
+        json.append("\"options\": [");
+        for (int i = 0; i < request.options.size(); i++) {
+            if (i > 0) json.append(",");
+            json.append("\"").append(escapeJson(request.options.get(i))).append("\"");
+        }
+        json.append("],");
+        json.append("\"minChoices\": ").append(request.minChoices).append(",");
+        json.append("\"maxChoices\": ").append(request.maxChoices).append(",");
+        json.append("\"metadata\": {}");
+        json.append("}");
+        json.append("}");
+        return json.toString();
+    }
+    
+    private String escapeJson(String str) {
+        return str.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+    
+    private PlayerControllerRl.RlDecisionResponse parseJsonResponse(String responseStr) {
+        // Basic JSON parsing - look for chosenIndices array
+        PlayerControllerRl.RlDecisionResponse response = new PlayerControllerRl.RlDecisionResponse();
+        
+        try {
+            // Very simple parsing - look for "chosenIndices":[numbers]
+            int start = responseStr.indexOf("\"chosenIndices\":");
+            if (start >= 0) {
+                start = responseStr.indexOf("[", start);
+                int end = responseStr.indexOf("]", start);
+                if (start >= 0 && end >= 0) {
+                    String arrayContent = responseStr.substring(start + 1, end).trim();
+                    if (!arrayContent.isEmpty()) {
+                        String[] parts = arrayContent.split(",");
+                        for (String part : parts) {
+                            try {
+                                response.chosenIndices.add(Integer.parseInt(part.trim()));
+                            } catch (NumberFormatException e) {
+                                // Skip invalid numbers
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error parsing JSON response: " + e.getMessage());
+        }
+        
+        return response;
+    }
+    
     /**
      * Send a message to the Python agent
      */
     private void sendMessage(String message) throws IOException {
         if (writer != null) {
+            System.out.println("Sending to Python: " + message);
             writer.println(message);
             writer.flush();
         }
@@ -96,12 +169,43 @@ public class RlBridge {
      * Wait for a response from the Python agent
      */
     private String waitForResponse(long timeoutMs) {
-        try {
-            return responseQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
+        long startTime = System.currentTimeMillis();
+        StringBuilder buffer = new StringBuilder();
+        
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            try {
+                if (reader != null && reader.ready()) {
+                    int ch = reader.read();
+                    if (ch != -1) {
+                        char c = (char) ch;
+                        if (c == '\n') {
+                            String line = buffer.toString().trim();
+                            if (!line.isEmpty()) {
+                                System.out.println("Received from Python: " + line);
+                                return line;
+                            }
+                            buffer.setLength(0); // Clear buffer
+                        } else {
+                            buffer.append(c);
+                        }
+                    }
+                } else {
+                    Thread.sleep(50); // Longer delay when no data is ready
+                }
+            } catch (IOException | InterruptedException e) {
+                System.err.println("Error waiting for response: " + e.getMessage());
+                break;
+            }
         }
+        
+        // Check if we have a partial message in buffer
+        String remaining = buffer.toString().trim();
+        if (!remaining.isEmpty()) {
+            System.out.println("Received partial from Python: " + remaining);
+            return remaining;
+        }
+        
+        return null; // Timeout
     }
     
     /**

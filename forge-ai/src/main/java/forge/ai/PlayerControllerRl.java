@@ -113,6 +113,13 @@ public class PlayerControllerRl extends PlayerController {
     public PlayerControllerRl(Game game, Player p, LobbyPlayer lp) {
         super(game, p, lp);
         this.rlBridge = new RlBridge();
+        
+        // Attempt to connect to the RL server
+        if (!this.rlBridge.connect()) {
+            System.out.println("Warning: Could not connect to RL agent server. Using fallback AI behavior.");
+        } else {
+            System.out.println("Successfully connected to RL agent server on localhost:12345");
+        }
     }
 
     @Override
@@ -122,11 +129,20 @@ public class PlayerControllerRl extends PlayerController {
 
     // Main decision routing method - this is where we abstract all decisions
     private RlDecisionResponse makeRlDecision(RlDecisionRequest request) {
-        // This is where we would call out to Python
-        // For now, return a stub implementation
+        // Use the RL bridge to request decision from Python
+        if (rlBridge != null) {
+            return rlBridge.requestDecision(request);
+        } else {
+            // Fallback if no RL bridge available
+            System.err.println("No RL bridge available, using fallback");
+            return createFallbackResponse(request);
+        }
+    }
+    
+    private RlDecisionResponse createFallbackResponse(RlDecisionRequest request) {
         RlDecisionResponse response = new RlDecisionResponse();
         
-        // Stub: just choose the first option for most decisions
+        // Fallback: just choose the first option for most decisions
         if (!request.options.isEmpty()) {
             response.chosenIndices.add(0);
             // For multi-choice decisions, choose up to maxChoices
@@ -169,7 +185,7 @@ public class PlayerControllerRl extends PlayerController {
         request.minChoices = isOptional ? 0 : min;
         request.maxChoices = max;
         request.metadata.put("title", title);
-        request.metadata.put("spellAbility", sa.getDescription());
+        request.metadata.put("spellAbility", sa != null ? sa.getDescription() : "None");
         
         RlDecisionResponse response = makeRlDecision(request);
         
@@ -237,21 +253,76 @@ public class PlayerControllerRl extends PlayerController {
 
     @Override
     public void declareAttackers(Player attacker, Combat combat) {
+        // For now, delegate to fallback AI to prevent stalling
         // TODO: Implement attacker selection using RL
-        // For now, fall back to no attacks
+        fallbackAi.declareAttackers(attacker, combat);
     }
 
     @Override
     public void declareBlockers(Player defender, Combat combat) {
-        // TODO: Implement blocker selection using RL  
-        // For now, fall back to no blocks
+        // For now, delegate to fallback AI to prevent stalling  
+        // TODO: Implement blocker selection using RL
+        fallbackAi.declareBlockers(defender, combat);
     }
 
     @Override
     public List<SpellAbility> chooseSpellAbilityToPlay() {
-        // TODO: Implement spell/ability selection using RL
-        // This is one of the most important decisions
-        return new ArrayList<>();
+        // Use RL agent to choose which spell/ability to play
+        CardCollection cards = ComputerUtilAbility.getAvailableCards(getGame(), player);
+        List<SpellAbility> playableSpells = ComputerUtilAbility.getSpellAbilities(cards, player);
+        
+        if (playableSpells.isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        RlGameState gameState = new RlGameState(getGame(), player);
+        RlDecisionRequest request = new RlDecisionRequest(RlDecisionType.PLAY_SPELL_OR_ABILITY, gameState);
+        
+        // Convert spells to string options for RL agent
+        List<String> options = new ArrayList<>();
+        options.add("Pass (play nothing)"); // Always include pass option
+        
+        for (SpellAbility sa : playableSpells) {
+            String description = sa.getHostCard().getName();
+            if (sa.isSpell()) {
+                description += " (Spell)";
+            } else {
+                description += " (" + sa.getDescription() + ")";
+            }
+            // Add mana cost info
+            if (sa.getPayCosts() != null && sa.getPayCosts().hasManaCost()) {
+                description += " [" + sa.getPayCosts().getCostMana().toString() + "]";
+            }
+            options.add(description);
+        }
+        
+        request.options = options;
+        request.minChoices = 0; // Can choose to pass
+        request.maxChoices = 1; // Choose one spell or pass
+        request.metadata.put("title", "Choose spell/ability to play");
+        request.metadata.put("availableSpells", playableSpells.size());
+        request.metadata.put("gamePhase", getGame().getPhaseHandler().getPhase().toString());
+        
+        RlDecisionResponse response = makeRlDecision(request);
+        
+        List<SpellAbility> result = new ArrayList<>();
+        
+        if (!response.chosenIndices.isEmpty()) {
+            int chosenIndex = response.chosenIndices.get(0);
+            
+            // Index 0 is "Pass", indices 1+ are actual spells
+            if (chosenIndex > 0 && chosenIndex <= playableSpells.size()) {
+                SpellAbility chosenSpell = playableSpells.get(chosenIndex - 1);
+                result.add(chosenSpell);
+                System.out.println("RL Agent chose to play: " + chosenSpell.getHostCard().getName());
+            } else {
+                System.out.println("RL Agent chose to pass");
+            }
+        } else {
+            System.out.println("RL Agent made no choice, defaulting to pass");
+        }
+        
+        return result;
     }
 
     // ============================================================================
@@ -739,6 +810,14 @@ public class PlayerControllerRl extends PlayerController {
     @Override
     public void resetAtEndOfTurn() {
         fallbackAi.resetAtEndOfTurn();
+    }
+    
+    @Override
+    protected void finalize() throws Throwable {
+        if (rlBridge != null) {
+            rlBridge.disconnect();
+        }
+        super.finalize();
     }
 
     @Override
