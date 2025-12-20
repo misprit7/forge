@@ -13,6 +13,8 @@ Usage:
 import numpy as np
 import argparse
 import time
+import signal
+import sys
 from typing import Optional
 import os
 
@@ -210,24 +212,34 @@ def evaluate_agent(agent, env: ForgeEnv, num_episodes: int = 10):
     return avg_reward, avg_length
 
 
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully"""
+    print("\nReceived interrupt signal. Cleaning up...")
+    sys.exit(0)
+
 def main():
+    # Set up signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
+    
     parser = argparse.ArgumentParser(description="Train RL agent for Magic: The Gathering")
     parser.add_argument("--algorithm", choices=["ppo", "dqn"], default="ppo",
                         help="RL algorithm to use")
-    parser.add_argument("--timesteps", type=int, default=100000,
+    parser.add_argument("--timesteps", type=int, default=10000,  # Reduced default for testing
                         help="Number of training timesteps")
     parser.add_argument("--host", default="localhost",
                         help="Forge server host")
     parser.add_argument("--port", type=int, default=12345,
                         help="Forge server port")
-    parser.add_argument("--eval-episodes", type=int, default=10,
+    parser.add_argument("--eval-episodes", type=int, default=3,  # Reduced for testing
                         help="Number of episodes for evaluation")
     parser.add_argument("--model-name", default="forge_agent",
                         help="Name for saving the model")
-    parser.add_argument("--deck1", default="wr",
-                        help="First deck to use (e.g., 'wr' for white/red)")
-    parser.add_argument("--deck2", default="gb", 
-                        help="Second deck to use (e.g., 'gb' for green/blue)")
+    parser.add_argument("--deck1", default="ai-test-1",  # Use decks that exist
+                        help="First deck to use")
+    parser.add_argument("--deck2", default="ai-test-1", 
+                        help="Second deck to use")
+    parser.add_argument("--connection-timeout", type=int, default=30,
+                        help="Timeout for connecting to Forge (seconds)")
     
     args = parser.parse_args()
     
@@ -236,6 +248,8 @@ def main():
     print(f"Timesteps: {args.timesteps}")
     print(f"Decks: {args.deck1} vs {args.deck2}")
     print(f"Forge will auto-start on localhost:{args.port}")
+    print(f"Connection timeout: {args.connection_timeout}s")
+    print("Press Ctrl+C at any time to stop training")
     print()
     
     # Create directories
@@ -243,16 +257,19 @@ def main():
     os.makedirs("logs", exist_ok=True)
     os.makedirs("tensorboard_logs", exist_ok=True)
     
-    # Create environment
-    print("Creating environment (this will auto-start Forge)...")
-    env = create_training_environment(args.host, args.port, args.deck1, args.deck2)
-    
-    # Show log file location
-    if hasattr(env, 'logs_dir'):
-        print(f"Forge output will be logged to: {env.logs_dir}")
-        print("Check the log files for detailed Forge execution information.")
-    
+    env = None
     try:
+        # Create environment
+        print("Creating environment (this will auto-start Forge)...")
+        env = create_training_environment(args.host, args.port, args.deck1, args.deck2)
+        
+        # Show log file location
+        if hasattr(env, 'logs_dir'):
+            print(f"Forge output will be logged to: {env.logs_dir}")
+            print("Check the log files for detailed Forge execution information.")
+        
+        print(f"Waiting up to {args.connection_timeout} seconds for Forge to start...")
+        
         # Train agent
         if args.algorithm == "ppo":
             agent = train_ppo_agent(env, args.timesteps, args.model_name)
@@ -265,11 +282,26 @@ def main():
         
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
+    except ConnectionError as e:
+        print(f"\nConnection failed: {e}")
+        print("Troubleshooting tips:")
+        print("1. Check if Java is installed and in PATH")
+        print("2. Verify run-forge.sh script exists and is executable")
+        print("3. Check the forge log files for errors")
+        if env and hasattr(env, 'logs_dir'):
+            print(f"   Log directory: {env.logs_dir}")
+        print("4. Try running Forge manually first to test the setup")
     except Exception as e:
         print(f"\nTraining failed: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        print("Closing environment...")
-        env.close()
+        if env:
+            print("Closing environment...")
+            try:
+                env.close()
+            except Exception as e:
+                print(f"Error closing environment: {e}")
     
     print("\nTraining session completed!")
 

@@ -26,6 +26,14 @@ from datetime import datetime
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
 
+# ANSI color codes
+class Colors:
+    RESET = '\033[0m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    GREEN = '\033[32m'
+    RED = '\033[31m'
+
 
 @dataclass
 class ForgeDecisionRequest:
@@ -164,9 +172,9 @@ class ActionProcessor:
         if len(request.options) == 0:
             return ForgeDecisionResponse([0])  # Pass if no options
         
-        print(f"RL Agent deciding from {len(request.options)} options:")
+        print(f"{Colors.GREEN}RL Agent deciding from {len(request.options)} options:{Colors.RESET}")
         for i, option in enumerate(request.options):
-            print(f"  {i}: {option}")
+            print(f"{Colors.GREEN}  {i}: {option}{Colors.RESET}")
         
         # For demonstration: Use action to choose, but add some logic
         if len(action) > 0:
@@ -178,7 +186,7 @@ class ActionProcessor:
         else:
             choice_index = 0
         
-        print(f"RL Agent selected option {choice_index}: {request.options[choice_index]}")
+        print(f"{Colors.GREEN}RL Agent selected option {choice_index}: {request.options[choice_index]}{Colors.RESET}")
         return ForgeDecisionResponse([choice_index])
 
 
@@ -263,12 +271,12 @@ class ForgeClient:
                             try:
                                 message = json.loads(line)
                                 if message.get("type") == "decision_request":
-                                    print(f"Python: Parsed decision request, putting in queue")
+                                    print(f"{Colors.BLUE}Python: Parsed decision request, putting in queue{Colors.RESET}")
                                     self.request_queue.put(message)
                                 else:
-                                    print(f"Python: Received non-decision message: {message.get('type')}")
+                                    print(f"{Colors.BLUE}Python: Received non-decision message: {message.get('type')}{Colors.RESET}")
                             except json.JSONDecodeError:
-                                print(f"Python: Invalid JSON received: {line}")
+                                print(f"{Colors.RED}Python: Invalid JSON received: {line}{Colors.RESET}")
                                 
                 except Exception as e:
                     if self.connected:
@@ -305,8 +313,8 @@ class ForgeEnv(gym.Env):
                  host: str = "localhost", 
                  port: int = 12345,
                  forge_root: str = None,
-                 deck1: str = "wr",
-                 deck2: str = "gb",
+                 deck1: str = "ai-test-1",
+                 deck2: str = "ai-test-1",
                  auto_start_forge: bool = True):
         super().__init__()
         
@@ -326,10 +334,10 @@ class ForgeEnv(gym.Env):
         else:
             self.forge_root = forge_root
             
-        # Verify forge root exists
-        run_script = os.path.join(self.forge_root, "run-forge-headless.sh")
-        if not os.path.exists(run_script):
-            raise FileNotFoundError(f"Forge run script not found at {run_script}. Please specify correct forge_root.")
+        # Verify forge root exists and store run script path
+        self.run_script = os.path.join(self.forge_root, "python/scripts/run-forge.sh")
+        if not os.path.exists(self.run_script):
+            raise FileNotFoundError(f"Forge run script not found at {self.run_script}. Please specify correct forge_root.")
         
         # Define observation and action spaces
         self.observation_space = gym.spaces.Box(
@@ -449,9 +457,8 @@ class ForgeEnv(gym.Env):
         log_filename = f"forge_output_{timestamp}.log"
         log_path = os.path.join(self.logs_dir, log_filename)
         
-        run_script = os.path.join(self.forge_root, "run-forge-headless.sh")
         cmd = [
-            run_script,
+            self.run_script,
             "sim", 
             "-ai", "rl",
             "-d", self.deck1, self.deck2,
@@ -509,7 +516,7 @@ class ForgeEnv(gym.Env):
                         self.log_file.write(log_line)
                         self.log_file.flush()
                         
-                        # Also print important messages to console
+                        # Also print important messages to console with color
                         if any(keyword in line for keyword in [
                             "RL Bridge server started", 
                             "Python RL client connected",
@@ -518,7 +525,8 @@ class ForgeEnv(gym.Env):
                             "Using Reinforcement Learning AI agent",
                             "ERROR", "Exception", "Failed"
                         ]):
-                            print(f"Forge: {line.strip()}")
+                            # Color forge messages yellow
+                            print(f"{Colors.YELLOW}Forge: {line.strip()}{Colors.RESET}")
                     else:
                         time.sleep(0.1)
                         
@@ -550,7 +558,7 @@ class ForgeEnv(gym.Env):
     def _stop_forge(self):
         """Stop Forge process if running"""
         if self.forge_process and self.forge_process.poll() is None:
-            print(f"Stopping Forge process {self.forge_process.pid}...")
+            print(f"{Colors.RED}Stopping Forge process {self.forge_process.pid}...{Colors.RESET}")
             try:
                 # First, disconnect the client
                 if self.forge_client.connected:
@@ -560,21 +568,52 @@ class ForgeEnv(gym.Env):
                 self._flush_remaining_output()
                 
                 # Kill the entire process group to clean up all child processes
-                os.killpg(os.getpgid(self.forge_process.pid), signal.SIGTERM)
+                try:
+                    pgid = os.getpgid(self.forge_process.pid)
+                    print(f"{Colors.RED}Killing process group {pgid}{Colors.RESET}")
+                    os.killpg(pgid, signal.SIGTERM)
+                except ProcessLookupError:
+                    print(f"{Colors.RED}Process group already terminated{Colors.RESET}")
                 
                 # Wait for process to terminate
                 try:
-                    self.forge_process.wait(timeout=5)
+                    self.forge_process.wait(timeout=3)
+                    print(f"{Colors.GREEN}Forge process terminated gracefully{Colors.RESET}")
                 except subprocess.TimeoutExpired:
-                    print("Forge process didn't terminate gracefully, forcing kill...")
-                    os.killpg(os.getpgid(self.forge_process.pid), signal.SIGKILL)
-                    self.forge_process.wait()
+                    print(f"{Colors.RED}Forge process didn't terminate gracefully, forcing kill...{Colors.RESET}")
+                    try:
+                        pgid = os.getpgid(self.forge_process.pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                        self.forge_process.wait(timeout=2)
+                    except (ProcessLookupError, subprocess.TimeoutExpired):
+                        print(f"{Colors.RED}Process may still be running, trying individual kill{Colors.RESET}")
+                        try:
+                            os.kill(self.forge_process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
                     
-                print("Forge process stopped")
             except Exception as e:
-                print(f"Error stopping Forge process: {e}")
+                print(f"{Colors.RED}Error stopping Forge process: {e}{Colors.RESET}")
             finally:
                 self.forge_process = None
+        
+        # Additional cleanup: kill any remaining Java processes that might be Forge
+        try:
+            import subprocess
+            # Find Java processes with "forge" in command line
+            result = subprocess.run(['pgrep', '-f', 'forge.view.Main'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    if pid:
+                        print(f"{Colors.RED}Killing remaining Forge process {pid}{Colors.RESET}")
+                        try:
+                            os.kill(int(pid), signal.SIGKILL)
+                        except (ProcessLookupError, ValueError):
+                            pass
+        except Exception as e:
+            print(f"{Colors.RED}Error in additional cleanup: {e}{Colors.RESET}")
     
     def _cleanup(self):
         """Clean up all resources"""

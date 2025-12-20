@@ -169,6 +169,37 @@ public class PlayerControllerRl extends PlayerController {
         }
         return options;
     }
+    
+    /**
+     * Create a JSON representation of the current battlefield state for the RL agent.
+     * This includes all creatures in play with their key properties.
+     */
+    private String createBattlefieldStateJson() {
+        StringBuilder json = new StringBuilder();
+        json.append("{\"creatures\":[");
+        
+        boolean first = true;
+        for (Player p : getGame().getPlayers()) {
+            CardCollectionView creatures = p.getCreaturesInPlay();
+            for (Card creature : creatures) {
+                if (!first) json.append(",");
+                first = false;
+                
+                json.append("{")
+                    .append("\"name\":\"").append(creature.getName()).append("\",")
+                    .append("\"controller\":\"").append(p.equals(player) ? "self" : "opponent").append("\",")
+                    .append("\"power\":").append(creature.getCurrentPower()).append(",")
+                    .append("\"toughness\":").append(creature.getCurrentToughness()).append(",")
+                    .append("\"tapped\":").append(creature.isTapped()).append(",")
+                    .append("\"attacking\":").append(creature.isAttacking()).append(",")
+                    .append("\"canAttack\":").append(creature.canAttack())
+                    .append("}");
+            }
+        }
+        
+        json.append("]}");
+        return json.toString();
+    }
 
     // ============================================================================
     // CORE DECISION METHOD IMPLEMENTATIONS
@@ -253,16 +284,112 @@ public class PlayerControllerRl extends PlayerController {
 
     @Override
     public void declareAttackers(Player attacker, Combat combat) {
-        // For now, delegate to fallback AI to prevent stalling
-        // TODO: Implement attacker selection using RL
-        fallbackAi.declareAttackers(attacker, combat);
+        if (!attacker.equals(player)) {
+            // Not our turn to attack, should not happen
+            return;
+        }
+        
+        // Get battlefield state and available attackers
+        RlGameState gameState = new RlGameState(getGame(), player);
+        RlDecisionRequest request = new RlDecisionRequest(RlDecisionType.DECLARE_ATTACKERS, gameState);
+        
+        // Get all creatures that can potentially attack
+        CardCollectionView availableAttackers = ComputerUtilCombat.getAllCreaturesCanAttack(player, combat);
+        
+        // Convert to options for RL agent
+        request.options.clear();
+        for (Card creature : availableAttackers) {
+            String option = creature.getName() + " [" + creature.getCurrentPower() + "/" + 
+                          creature.getCurrentToughness() + "]" + (creature.isTapped() ? " (tapped)" : "");
+            request.options.add(option);
+        }
+        
+        // Add battlefield state to metadata
+        request.metadata.put("availableAttackers", availableAttackers.size());
+        request.metadata.put("battlefieldState", createBattlefieldStateJson());
+        request.minChoices = 0; // Can choose to not attack
+        request.maxChoices = availableAttackers.size(); // Can attack with all
+        
+        System.out.println("RL Agent deciding attackers from " + availableAttackers.size() + " available creatures");
+        
+        RlDecisionResponse response = makeRlDecision(request);
+        
+        // Process the response and declare attacks
+        for (Integer index : response.chosenIndices) {
+            if (index >= 0 && index < availableAttackers.size()) {
+                Card attacker = availableAttackers.get(index);
+                if (ComputerUtilCombat.canAttackNextTurn(attacker)) {
+                    combat.addAttacker(attacker, getGame().getCombat().getDefenders().get(0));
+                    System.out.println("RL Agent chose to attack with: " + attacker.getName());
+                }
+            }
+        }
+        
+        if (response.chosenIndices.isEmpty()) {
+            System.out.println("RL Agent chose not to attack");
+        }
     }
 
     @Override
     public void declareBlockers(Player defender, Combat combat) {
-        // For now, delegate to fallback AI to prevent stalling  
-        // TODO: Implement blocker selection using RL
-        fallbackAi.declareBlockers(defender, combat);
+        if (!defender.equals(player)) {
+            // Not our turn to block, should not happen
+            return;
+        }
+        
+        // Get battlefield state and available blockers
+        RlGameState gameState = new RlGameState(getGame(), player);
+        RlDecisionRequest request = new RlDecisionRequest(RlDecisionType.DECLARE_BLOCKERS, gameState);
+        
+        // Get all creatures that can potentially block
+        CardCollectionView availableBlockers = ComputerUtilCombat.getAllCreaturesCanBlock(player, combat);
+        CardCollectionView attackers = combat.getAttackers();
+        
+        // Create blocking options - simplified for now (each blocker can block one attacker)
+        request.options.clear();
+        request.options.add("Block nothing"); // Option 0: no blocks
+        
+        for (Card blocker : availableBlockers) {
+            for (Card attacker : attackers) {
+                if (ComputerUtilCombat.canBlockerBlock(blocker, attacker, combat)) {
+                    String option = blocker.getName() + " [" + blocker.getCurrentPower() + "/" + 
+                                  blocker.getCurrentToughness() + "] blocks " + attacker.getName() + 
+                                  " [" + attacker.getCurrentPower() + "/" + attacker.getCurrentToughness() + "]";
+                    request.options.add(option);
+                }
+            }
+        }
+        
+        // Add battlefield state to metadata
+        request.metadata.put("availableBlockers", availableBlockers.size());
+        request.metadata.put("attackers", attackers.size());
+        request.metadata.put("battlefieldState", createBattlefieldStateJson());
+        request.minChoices = 0; // Can choose to not block anything
+        request.maxChoices = Math.min(availableBlockers.size(), attackers.size());
+        
+        System.out.println("RL Agent deciding blocks for " + attackers.size() + " attackers with " + 
+                          availableBlockers.size() + " available blockers");
+        
+        RlDecisionResponse response = makeRlDecision(request);
+        
+        // Process blocking decisions
+        // For now, simplified: each choice represents one blocker-attacker pair
+        for (Integer index : response.chosenIndices) {
+            if (index > 0 && index < request.options.size()) {
+                // Parse the blocking decision and execute it
+                // This is a simplified implementation - in a full version we'd need more sophisticated parsing
+                String choice = request.options.get(index);
+                System.out.println("RL Agent chose: " + choice);
+                
+                // TODO: Implement actual blocking assignment parsing
+                // For now, just log the choice - the Python side will need to send more structured data
+            }
+        }
+        
+        if (response.chosenIndices.isEmpty() || 
+            (response.chosenIndices.size() == 1 && response.chosenIndices.get(0) == 0)) {
+            System.out.println("RL Agent chose not to block");
+        }
     }
 
     @Override
