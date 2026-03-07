@@ -2,11 +2,7 @@ package forge.ai.gym;
 
 import java.util.Set;
 
-import forge.LobbyPlayer;
-import forge.game.Game;
-import forge.game.player.IGameEntitiesFactory;
 import forge.game.player.Player;
-import forge.game.player.PlayerController;
 import forge.ai.LobbyPlayerAi;
 import forge.ai.PlayerControllerAi;
 

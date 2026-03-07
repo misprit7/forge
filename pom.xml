@@ -65,7 +65,6 @@
         <module>forge-core</module>
         <module>forge-game</module>
         <module>forge-ai</module>
-        <module>forge-gym</module>
         <module>forge-gui</module>
         <module>forge-gui-mobile</module>
         <module>forge-gui-mobile-dev</module>
@@ -91,6 +90,7 @@
     </distributionManagement>
 
     <build>
+
 
         <extensions>
             <extension>
