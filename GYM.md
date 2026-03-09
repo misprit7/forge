@@ -4,6 +4,7 @@
 
 - Java 21+
 - Maven
+- [uv](https://docs.astral.sh/uv/) (for the Python gym env)
 
 ## Build
 
@@ -70,17 +71,26 @@ java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with
 - `-d <deck1> <deck2>` — deck names (player 0 = gym agent, player 1 = AI opponent)
 - `-p <port>` — TCP port (default: 9753)
 
-Then connect from Python:
+Then connect from Python (in a separate terminal):
 
-```python
+```bash
+cd forge-gym
+uv run python -c "
 from forge_env import ForgeMTGEnv
-
 env = ForgeMTGEnv(port=9753)
 obs, info = env.reset()
 print(info)  # {'method': 'chooseStartingPlayer', 'options': ['play', 'draw'], ...}
-
 obs, reward, terminated, truncated, info = env.step(0)  # 0=play, 1=draw
 print(reward, info)  # 1.0 {'winner': 0, 'turns': 42}
+env.close()
+"
 ```
 
-The gym env is in `forge-gym/forge_env.py`. Currently exposes only the play/draw decision; all other decisions are handled by the AI.
+The gym env is in `forge-gym/`. Set up the virtual environment with:
+
+```bash
+cd forge-gym
+uv sync
+```
+
+Currently exposes only the play/draw decision; all other decisions are handled by the AI.
