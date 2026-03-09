@@ -81,12 +81,16 @@ public final class Main {
                 CardReaderExperiments.parseAllCards(args);
                 break;
 
+            case "gym":
+                GymServer.start(args);
+                break;
+
             case "server":
                 System.out.println("Dedicated server mode.\nNot implemented.");
                 break;
 
             default:
-                System.out.println("Unknown mode.\nKnown mode is 'sim', 'parse' ");
+                System.out.println("Unknown mode.\nKnown mode is 'sim', 'parse', 'gym' ");
                 break;
         }
 

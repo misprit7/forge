@@ -56,3 +56,31 @@ On Linux, user data and cache go to:
 - **Cache:** `~/.cache/forge/` (skins, card pics, fonts, db)
 
 These can be overridden via `forge.profile.properties` in the assets directory.
+
+## Run (Gym Server)
+
+Start a TCP server that exposes game decisions to a Python Gymnasium agent:
+
+```bash
+cd forge-gui
+java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with-dependencies.jar gym -d grizzly grizzly -p 9753
+```
+
+- `gym` — gymnasium server mode
+- `-d <deck1> <deck2>` — deck names (player 0 = gym agent, player 1 = AI opponent)
+- `-p <port>` — TCP port (default: 9753)
+
+Then connect from Python:
+
+```python
+from forge_env import ForgeMTGEnv
+
+env = ForgeMTGEnv(port=9753)
+obs, info = env.reset()
+print(info)  # {'method': 'chooseStartingPlayer', 'options': ['play', 'draw'], ...}
+
+obs, reward, terminated, truncated, info = env.step(0)  # 0=play, 1=draw
+print(reward, info)  # 1.0 {'winner': 0, 'turns': 42}
+```
+
+The gym env is in `forge-gym/forge_env.py`. Currently exposes only the play/draw decision; all other decisions are handled by the AI.
