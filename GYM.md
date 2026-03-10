@@ -31,7 +31,7 @@ Run AI-vs-AI games from the command line without the GUI:
 
 ```bash
 cd forge-gui
-java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with-dependencies.jar sim -d grizzly grizzly -n 3
+java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with-dependencies.jar sim -d gb gb -n 3
 ```
 
 - `sim` — simulation mode (no GUI)
@@ -58,20 +58,42 @@ On Linux, user data and cache go to:
 
 These can be overridden via `forge.profile.properties` in the assets directory.
 
-## Run (Gym Server)
+## Run (Gym)
 
-Start a TCP server that exposes game decisions to a Python Gymnasium agent:
+Set up the Python virtual environment:
+
+```bash
+cd forge-gym
+uv sync
+```
+
+### Auto-start (headless training)
+
+The env finds the jar and starts Forge automatically:
+
+```bash
+cd forge-gym
+uv run python -c "
+from forge_env import ForgeMTGEnv
+env = ForgeMTGEnv(decks=['gb', 'gb'])
+obs, info = env.reset()
+print(info)
+obs, reward, terminated, truncated, info = env.step(0)  # 0=play, 1=draw
+print(reward, info)
+env.close()
+"
+```
+
+### Connect to existing server
+
+Start Forge separately (e.g. for debugging or a custom setup):
 
 ```bash
 cd forge-gui
-java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with-dependencies.jar gym -d grizzly grizzly -p 9753
+java -jar ../forge-gui-desktop/target/forge-gui-desktop-2.0.12-SNAPSHOT-jar-with-dependencies.jar gym -d gb gb -p 9753
 ```
 
-- `gym` — gymnasium server mode
-- `-d <deck1> <deck2>` — deck names (player 0 = gym agent, player 1 = AI opponent)
-- `-p <port>` — TCP port (default: 9753)
-
-Then connect from Python (in a separate terminal):
+Then connect from Python:
 
 ```bash
 cd forge-gym
@@ -79,18 +101,15 @@ uv run python -c "
 from forge_env import ForgeMTGEnv
 env = ForgeMTGEnv(port=9753)
 obs, info = env.reset()
-print(info)  # {'method': 'chooseStartingPlayer', 'options': ['play', 'draw'], ...}
-obs, reward, terminated, truncated, info = env.step(0)  # 0=play, 1=draw
-print(reward, info)  # 1.0 {'winner': 0, 'turns': 42}
+obs, reward, terminated, truncated, info = env.step(0)
 env.close()
 "
 ```
 
-The gym env is in `forge-gym/`. Set up the virtual environment with:
+### Gym server CLI args
 
-```bash
-cd forge-gym
-uv sync
-```
+- `gym` — gymnasium server mode
+- `-d <deck1> <deck2>` — deck names (player 0 = gym agent, player 1 = AI opponent)
+- `-p <port>` — TCP port (default: 9753)
 
 Currently exposes only the play/draw decision; all other decisions are handled by the AI.

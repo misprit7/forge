@@ -1,14 +1,29 @@
 """Gymnasium environment for Forge MTG."""
 
 import json
+import os
 import socket
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+
+# Default path: forge-gym/../forge-gui-desktop/target/
+_DEFAULT_FORGE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _find_jar(forge_root: Path) -> Path:
+    """Find the forge-gui-desktop jar in the build output."""
+    target_dir = forge_root / "forge-gui-desktop" / "target"
+    for f in sorted(target_dir.glob("forge-gui-desktop-*-jar-with-dependencies.jar")):
+        return f
+    raise FileNotFoundError(
+        f"No forge-gui-desktop jar found in {target_dir}. Run 'mvn package -DskipTests' first."
+    )
 
 
 class ForgeMTGEnv(gym.Env):
@@ -23,6 +38,13 @@ class ForgeMTGEnv(gym.Env):
     When the gym agent doesn't win the coin toss, no decision is presented.
     In that case, reset() returns with info["skipped"]=True and the episode
     is immediately terminal (step() should not be called).
+
+    Usage:
+        # Auto-start Forge (headless training):
+        env = ForgeMTGEnv(decks=["gb", "gb"])
+
+        # Connect to an already-running Forge server:
+        env = ForgeMTGEnv(port=9753)
     """
 
     metadata = {"render_modes": []}
@@ -31,9 +53,22 @@ class ForgeMTGEnv(gym.Env):
         self,
         host: str = "localhost",
         port: int = 9753,
-        forge_jar: Optional[str] = None,
-        forge_args: Optional[list[str]] = None,
+        decks: Optional[list[str]] = None,
+        forge_root: Optional[str] = None,
+        java: str = "java",
+        java_args: Optional[list[str]] = None,
     ):
+        """
+        Args:
+            host: Hostname to connect to.
+            port: TCP port for the gym server.
+            decks: Two deck names, e.g. ["gb", "gb"]. If provided,
+                Forge is started as a subprocess automatically.
+            forge_root: Path to the Forge project root. Defaults to the parent
+                of the forge-gym directory.
+            java: Java executable name or path.
+            java_args: Extra JVM arguments (e.g. ["-Xmx4g"]).
+        """
         super().__init__()
 
         self.host = host
@@ -54,31 +89,48 @@ class ForgeMTGEnv(gym.Env):
         self._needs_step = False
         self._last_game_over = None
 
-        # Start Forge subprocess if jar path provided
-        if forge_jar is not None:
-            args = ["java", "-jar", forge_jar, "gym"] + (forge_args or [])
+        # Auto-start Forge if decks are provided
+        if decks is not None:
+            if len(decks) < 2:
+                raise ValueError("Need at least 2 deck names")
+            root = Path(forge_root) if forge_root else _DEFAULT_FORGE_ROOT
+            jar = _find_jar(root)
+            cwd = root / "forge-gui"  # Must run from here for asset resolution
+
+            cmd = [java]
+            if java_args:
+                cmd.extend(java_args)
+            cmd.extend(["-jar", str(jar), "gym", "-d"] + list(decks) + ["-p", str(port)])
+
             self.forge_process = subprocess.Popen(
-                args,
+                cmd,
+                cwd=str(cwd),
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
-            # Wait for server to start
-            time.sleep(3)
 
         self._connect()
 
     def _connect(self):
-        """Connect to the Forge gym server."""
+        """Connect to the Forge gym server, retrying until it's ready."""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        for attempt in range(10):
+        for attempt in range(30):
             try:
                 self.sock.connect((self.host, self.port))
                 return
             except ConnectionRefusedError:
-                if attempt < 9:
+                if self.forge_process and self.forge_process.poll() is not None:
+                    stdout = self.forge_process.stdout.read().decode() if self.forge_process.stdout else ""
+                    raise RuntimeError(
+                        f"Forge process exited with code {self.forge_process.returncode}:\n{stdout}"
+                    )
+                if attempt < 29:
                     time.sleep(1)
                 else:
-                    raise
+                    raise ConnectionError(
+                        f"Could not connect to Forge gym server at {self.host}:{self.port} "
+                        f"after 30 attempts"
+                    )
 
     def _send(self, obj: dict):
         """Send a JSON message."""
@@ -174,5 +226,8 @@ class ForgeMTGEnv(gym.Env):
             self.sock = None
         if self.forge_process:
             self.forge_process.terminate()
-            self.forge_process.wait(timeout=10)
+            try:
+                self.forge_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.forge_process.kill()
             self.forge_process = None
