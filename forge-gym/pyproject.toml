@@ -6,6 +6,11 @@ requires-python = ">=3.10"
 dependencies = [
     "gymnasium>=1.0",
     "numpy",
+    "stable-baselines3>=2.0",
+    "tensorboard",
+    "setuptools<81",
+    "ipykernel",
+    "jupytext",
 ]
 
 [build-system]

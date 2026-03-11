@@ -2,7 +2,11 @@ package forge.ai.gym;
 
 import forge.LobbyPlayer;
 import forge.ai.PlayerControllerAi;
+import forge.game.card.Card;
 import forge.game.Game;
+import forge.game.GameEntity;
+import forge.game.combat.Combat;
+import forge.game.combat.CombatUtil;
 import forge.game.player.Player;
 
 /**
@@ -58,6 +62,22 @@ public class PlayerControllerGym extends PlayerControllerAi {
             System.err.println("GymSocket error in chooseStartingPlayer: " + e.getMessage());
         }
         return super.chooseStartingPlayer(isFirstGame);
+    }
+
+    @Override
+    public void declareAttackers(Player attacker, Combat combat) {
+        // Fast policy: attack with everything that can legally attack
+        GameEntity defender = combat.getDefenders().getFirst();
+        for (Card c : attacker.getCreaturesInPlay()) {
+            if (CombatUtil.canAttack(c, defender)) {
+                combat.addAttacker(c, defender);
+            }
+        }
+    }
+
+    @Override
+    public void declareBlockers(Player defender, Combat combat) {
+        // Fast policy: never block
     }
 
     private static int parseAction(String json) {

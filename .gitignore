@@ -95,5 +95,9 @@ forge-gui/tools/PerSetTrackingResults
 __pycache__
 *.pyc
 
+# Ignore tensorboard logs
+forge-gym/runs/
+forge-gym/notebooks/tb_logs/
+
 # Ignore Claude configuration
 .claude

@@ -33,11 +33,11 @@ class ForgeMTGEnv(gym.Env):
     All other game decisions are handled by the Forge AI.
 
     Action space: Discrete(2) — 0 = play (go first), 1 = draw (go second)
-    Observation space: Dict with decision method and options
+    Observation space: Box([0], [0], float32) — placeholder (single zero);
+        will become meaningful as more decision types are added.
 
-    When the gym agent doesn't win the coin toss, no decision is presented.
-    In that case, reset() returns with info["skipped"]=True and the episode
-    is immediately terminal (step() should not be called).
+    When the gym agent doesn't win the coin toss, reset() automatically
+    re-rolls until a decision is needed, so callers always get a valid episode.
 
     Usage:
         # Auto-start Forge (headless training):
@@ -80,14 +80,10 @@ class ForgeMTGEnv(gym.Env):
         # Action space: play or draw
         self.action_space = spaces.Discrete(2)
 
-        # Observation: just the decision method for now
-        self.observation_space = spaces.Dict({
-            "method": spaces.Discrete(1),  # 0 = chooseStartingPlayer
-        })
-
-        # Track whether the current episode needs a step() call
-        self._needs_step = False
-        self._last_game_over = None
+        # Observation: flat array, placeholder for now
+        self.observation_space = spaces.Box(
+            low=0.0, high=1.0, shape=(1,), dtype=np.float32
+        )
 
         # Auto-start Forge if decks are provided
         if decks is not None:
@@ -146,65 +142,39 @@ class ForgeMTGEnv(gym.Env):
         line, _, self._recv_buf = self._recv_buf.partition(b"\n")
         return json.loads(line)
 
+    def _obs(self) -> np.ndarray:
+        return np.zeros(1, dtype=np.float32)
+
     def reset(
         self,
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[dict, dict]:
+    ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
 
-        # Tell Forge to start a new game
-        self._send({"command": "reset"})
+        # Keep resetting until we get a game where the agent has a decision.
+        # (When the AI wins the coin toss, the game plays out without us.)
+        while True:
+            self._send({"command": "reset"})
+            msg = self._receive()
 
-        # Receive either a decision request or game_over
-        # (game_over happens when AI won the coin toss — no decision for us)
-        msg = self._receive()
+            if msg.get("type") == "game_over":
+                # No decision this game — try again
+                continue
 
-        obs = {"method": 0}
-
-        if msg.get("type") == "game_over":
-            # No decision was needed this game
-            self._needs_step = False
-            self._last_game_over = msg
+            # Got a decision request
             info = {
-                "skipped": True,
-                "winner": msg.get("winner", -1),
-                "turns": msg.get("turns", 0),
-                "reward": msg.get("reward", 0.0),
-            }
-        else:
-            # Decision request
-            self._needs_step = True
-            self._last_game_over = None
-            info = {
-                "skipped": False,
                 "method": msg.get("method", ""),
                 "options": msg.get("options", []),
                 "player": msg.get("player", ""),
                 "opponent": msg.get("opponent", ""),
             }
+            return self._obs(), info
 
-        return obs, info
-
-    def step(self, action: int) -> tuple[dict, float, bool, bool, dict]:
-        if not self._needs_step:
-            # Episode was already terminal from reset (no decision needed)
-            msg = self._last_game_over or {}
-            return (
-                {"method": 0},
-                msg.get("reward", 0.0),
-                True,
-                False,
-                {"winner": msg.get("winner", -1), "turns": msg.get("turns", 0)},
-            )
-
-        # Send the action
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         self._send({"action": int(action)})
-
-        # Receive game result
         msg = self._receive()
-        self._needs_step = False
 
         reward = msg.get("reward", 0.0)
         terminated = msg.get("type") == "game_over"
@@ -212,10 +182,10 @@ class ForgeMTGEnv(gym.Env):
         info = {
             "winner": msg.get("winner", -1),
             "turns": msg.get("turns", 0),
+            "action": int(action),
         }
 
-        obs = {"method": 0}
-        return obs, reward, terminated, truncated, info
+        return self._obs(), reward, terminated, truncated, info
 
     def close(self):
         if self.sock:
